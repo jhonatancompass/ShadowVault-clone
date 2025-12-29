@@ -23,6 +23,12 @@ class FileListViewModel(
     private val _selected = MutableStateFlow<Set<File>>(emptySet())
     val selected: StateFlow<Set<File>> = _selected
 
+    enum class ClipboardAction { DUPLICATE, CUT }
+    private val _clipboardFiles = MutableStateFlow<List<File>>(emptyList())
+    private val _clipboardAction = MutableStateFlow<ClipboardAction?>(null)
+    val clipboardFiles: StateFlow<List<File>> = _clipboardFiles
+    val clipboardAction: StateFlow<ClipboardAction?> = _clipboardAction
+
     fun load(path: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _loading.value = true
@@ -73,5 +79,86 @@ class FileListViewModel(
 
     fun sizeSelected(): Int {
         return _selected.value.size
+    }
+
+    private fun resolveNameConflict(destinationDir: File, source: File): File {
+        val name = source.nameWithoutExtension
+        val ext = source.extension.takeIf { it.isNotEmpty() }?.let { ".$it" } ?: ""
+
+        var index = 0
+        var candidate: File
+
+        do {
+            val suffix = if (index == 0) "" else " ($index)"
+            candidate = File(destinationDir, "$name$suffix$ext")
+            index++
+        } while (candidate.exists())
+
+        return candidate
+    }
+
+    fun clearClipboard() {
+        _clipboardFiles.value = emptyList()
+        _clipboardAction.value = null
+    }
+
+    fun duplicateSelection() {
+        _clipboardFiles.value = _selected.value.toList()
+        _clipboardAction.value = ClipboardAction.DUPLICATE
+        _selected.value = emptySet()
+    }
+
+    fun cutSelection() {
+        _clipboardFiles.value = _selected.value.toList()
+        _clipboardAction.value = ClipboardAction.CUT
+        _selected.value = emptySet()
+    }
+
+    fun duplicateFiles(destinationPath: String) {
+        val filesToPaste = _clipboardFiles.value
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val destinationDir = File(destinationPath)
+
+            filesToPaste.forEach { source ->
+                val target = resolveNameConflict(destinationDir, source)
+                source.copyRecursively(target, overwrite = true)
+            }
+
+            _clipboardFiles.value = emptyList()
+
+            load(destinationPath)
+            clearSelection()
+        }
+    }
+
+    fun pasteClipboard(destinationPath: String) {
+
+        val filesToPaste = _clipboardFiles.value
+        val action = _clipboardAction.value
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val destinationDir = File(destinationPath)
+
+            filesToPaste.forEach { source ->
+                when (action) {
+                    ClipboardAction.DUPLICATE -> {
+                        val target = File(destinationDir, source.name)
+                        source.copyRecursively(target, overwrite = true)
+                    }
+                    ClipboardAction.CUT -> {
+                        val target = File(destinationDir, source.name)
+                        source.renameTo(target)
+                    }
+                    else -> {}
+                }
+            }
+
+            _clipboardFiles.value = emptyList()
+            _clipboardAction.value = null
+
+            load(destinationPath)
+            clearSelection()
+        }
     }
 }

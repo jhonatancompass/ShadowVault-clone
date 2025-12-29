@@ -99,6 +99,7 @@ class FileListActivity : AppCompatActivity() {
 
         // copy paste actions
         findViewById<ImageButton>(R.id.cancel_copy_btn).setOnClickListener {
+            viewModel.clearClipboard()
             viewModel.clearSelection()
             taskbarController.hide_copy_paste()
         }
